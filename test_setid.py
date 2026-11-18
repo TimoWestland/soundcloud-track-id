@@ -131,6 +131,12 @@ def test_readme_lists_every_flag_and_setting() -> None:
         assert f"`{name}`" in readme, name
 
 
+def test_shebang_uses_only_uv_managed_python() -> None:
+    # /usr/bin/python3 on a Mac without developer tools is a stub that opens an install dialog when uv probes it
+    first = (Path(__file__).parent / "setid.py").read_text().splitlines()[0]
+    assert "--managed-python" in first, first
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

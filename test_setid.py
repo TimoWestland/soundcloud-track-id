@@ -1,6 +1,8 @@
 """Self-check for the merge logic. Run: python3 test_setid.py"""
 import argparse
+from pathlib import Path
 
+import setid
 from setid import Entry, MIN_STEP, REQUEST_OVERHEAD, UNKNOWN, Hit, auto_step, hms, merge, parse_time, render_markdown, split_title, spotify_track_list, to_hit, with_spotify_tracks
 
 A = dict(key="a", title="A", artist="X")
@@ -93,6 +95,46 @@ def test_split_title() -> None:
     assert title == "Set | Name", title
     assert body.startswith("[Open in soundcloud →](https://soundcloud.com/a/b)"), body
     assert split_title("no heading\n") == ("", "no heading\n")
+
+
+def test_output_and_cache_dirs() -> None:
+    assert setid.OUT_DIR == Path.home() / "Music" / "setid"
+    assert setid.CACHE_DIR == Path.home() / "Library" / "Caches" / "setid"
+    assert not hasattr(setid, "PROJECT_DIR")
+
+
+def test_pcm_to_wav_has_real_length() -> None:
+    import io, wave
+    pcm = b"\x01\x00" * 16000  # one second of 16-bit mono at 16 kHz
+    with wave.open(io.BytesIO(setid.pcm_to_wav(pcm, 16000))) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 16000)
+        assert w.getnframes() == 16000, w.getnframes()
+
+
+SETTINGS = ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "NOTION_TOKEN", "NOTION_SOUNDCLOUD_PAGE_ID"]
+
+
+def long_flags() -> list[str]:
+    return [o for a in setid.build_parser()._actions for o in a.option_strings if o.startswith("--") and o != "--help"]
+
+
+def test_help_lists_flags_settings_and_examples() -> None:
+    text = setid.build_parser().format_help()
+    for name in long_flags() + SETTINGS:
+        assert name in text, name
+    assert "Examples:" in text and "setid https://soundcloud.com/" in text
+
+
+def test_readme_lists_every_flag_and_setting() -> None:
+    readme = (Path(__file__).parent / "README.md").read_text()
+    for name in long_flags() + SETTINGS:
+        assert f"`{name}`" in readme, name
+
+
+def test_shebang_uses_only_uv_managed_python() -> None:
+    # /usr/bin/python3 on a Mac without developer tools is a stub that opens an install dialog when uv probes it
+    first = (Path(__file__).parent / "setid.py").read_text().splitlines()[0]
+    assert "--managed-python" in first, first
 
 
 if __name__ == "__main__":

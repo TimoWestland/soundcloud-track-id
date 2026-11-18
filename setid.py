@@ -1,7 +1,7 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run --managed-python --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["shazamio==0.8.1", "shazamio-core>=1.1,<2", "yt-dlp", "audioop-lts; python_version >= '3.13'"]
+# dependencies = ["imageio-ffmpeg>=0.6,<0.9", "shazamio==0.8.1", "shazamio-core>=1.1,<2", "yt-dlp", "audioop-lts; python_version >= '3.13'"]
 # ///
 """Identify the tracks in a SoundCloud DJ set, set79-style, from the command line.
 
@@ -10,6 +10,7 @@ Pipeline: yt-dlp download -> ffmpeg snippets -> Shazam -> merge -> table + JSON 
 import argparse
 import asyncio
 import base64
+import io
 import json
 import math
 import os
@@ -17,6 +18,7 @@ import re
 import subprocess
 import sys
 import warnings
+import wave
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -24,15 +26,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-PROJECT_DIR = Path(__file__).resolve().parent  # resolve so a symlink on PATH still writes here
-CACHE_DIR = PROJECT_DIR / ".cache"
-OUT_DIR = PROJECT_DIR / "tracklists"
+CACHE_DIR = Path.home() / "Library" / "Caches" / "setid"
+OUT_DIR = Path.home() / "Music" / "setid"
 UNKNOWN = "Unknown ID"
 RATE_LIMIT_WAIT = 60
+SAMPLE_RATE = 16000
 NOTION_VERSION = "2026-03-11"
 MIN_STEP = 90  # two snippets per track for sets whose tracks play at least 3 minutes
 REQUEST_OVERHEAD = 3  # ffmpeg + fingerprint + HTTP per snippet, measured: a 90-min set at step 30 and pace 12 took 45 min
 warnings.filterwarnings("ignore", category=SyntaxWarning)  # pydub, pulled in by shazamio, trips this on Python 3.13
+warnings.filterwarnings("ignore", message="Couldn't find ffmpeg", category=RuntimeWarning)  # pydub looks for a system ffmpeg setid never uses
 
 
 @dataclass
@@ -114,7 +117,7 @@ def merge(hits: list[Hit], step: int, min_unknown: int | None = None, strict: bo
 def download(url: str) -> tuple[str, int, Path]:
     import yt_dlp
 
-    CACHE_DIR.mkdir(exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
     opts = {
         "format": "bestaudio/best",
         "outtmpl": str(CACHE_DIR / "%(id)s.%(ext)s"),
@@ -131,16 +134,29 @@ def download(url: str) -> tuple[str, int, Path]:
     return info.get("title") or path.stem, duration, path
 
 
+def pcm_to_wav(pcm: bytes, rate: int) -> bytes:
+    """Wrap 16-bit mono PCM in a WAV with real lengths; a piped WAV has none and makes shazamio-core shell out to ffmpeg."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
 async def snippet(audio: Path, offset: int, length: int) -> bytes:
+    import imageio_ffmpeg  # bundled ffmpeg, so nothing needs installing system-wide
+
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-v", "error", "-ss", str(offset), "-t", str(length), "-i", str(audio),
-        "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
+        imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-ss", str(offset), "-t", str(length), "-i", str(audio),
+        "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1",
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg failed at {hms(offset)}: {err.decode().strip()}")
-    return out
+    return pcm_to_wav(out, SAMPLE_RATE)
 
 
 @contextmanager
@@ -305,8 +321,34 @@ def render_markdown(title: str, url: str, duration: int, snippets: int, length: 
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+HELP_EPILOG = """\
+Examples:
+  setid https://soundcloud.com/artist/some-set --step 90
+      a whole set; every track of 3+ minutes gets two snippets
+  setid https://soundcloud.com/artist/some-set --start 1:50:00 --end 2:05:00 --step 30
+      find one track: only the minutes around it, snippets close together
+  setid https://soundcloud.com/artist/some-set --step 90 --copy-spotify
+      copy Spotify track links; paste them into a playlist in the Spotify app
+  setid https://soundcloud.com/artist/some-set --step 90 --notion
+      also create a Notion page with the tracklist
+
+Settings (optional, add to ~/.zshrc as export NAME=value):
+  SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+      exact Spotify track links instead of search links; needed for --copy-spotify
+  NOTION_TOKEN
+      Notion personal access token; needed for --notion
+  NOTION_SOUNDCLOUD_PAGE_ID
+      Notion page to create tracklists under (default: your Private section)
+
+Tracklists are saved to ~/Music/setid.
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="setid", description=__doc__.splitlines()[0], epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("url", help="SoundCloud set URL")
     ap.add_argument("--start", type=parse_time, default=0, help="analyse from this time, h:mm:ss (default: the beginning)")
     ap.add_argument("--end", type=parse_time, default=None, help="analyse up to this time, h:mm:ss (default: the end)")
@@ -320,7 +362,11 @@ def main() -> None:
     copy.add_argument("--copy-spotify", action="store_true", help="copy the Spotify track links, one per line, to paste into a playlist")
     ap.add_argument("--notion", action="store_true", help="also create a Notion page with the tracklist (needs NOTION_TOKEN)")
     ap.add_argument("--strict", action="store_true", help="only keep a track when two neighbouring snippets agree; needs at least two snippets per track")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     print("Downloading...", file=sys.stderr)
     title, duration, audio = download(args.url)
@@ -337,7 +383,7 @@ def main() -> None:
         print("Looking up Spotify track links...", file=sys.stderr)
         entries = with_spotify_tracks(entries, lambda isrc: spotify_track(token, isrc))
 
-    OUT_DIR.mkdir(exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^\w-]+", "-", title).strip("-")[:80] or "set"
     if args.start or end < duration:  # keep partial runs from overwriting the full-set tracklist
         slug += f"_{hms(args.start)}-{hms(end)}".replace(":", "")

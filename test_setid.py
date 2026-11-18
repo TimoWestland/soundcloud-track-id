@@ -103,6 +103,14 @@ def test_output_and_cache_dirs() -> None:
     assert not hasattr(setid, "PROJECT_DIR")
 
 
+def test_pcm_to_wav_has_real_length() -> None:
+    import io, wave
+    pcm = b"\x01\x00" * 16000  # one second of 16-bit mono at 16 kHz
+    with wave.open(io.BytesIO(setid.pcm_to_wav(pcm, 16000))) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 16000)
+        assert w.getnframes() == 16000, w.getnframes()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

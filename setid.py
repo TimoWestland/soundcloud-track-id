@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["shazamio==0.8.1", "shazamio-core>=1.1,<2", "yt-dlp", "audioop-lts; python_version >= '3.13'"]
+# dependencies = ["imageio-ffmpeg>=0.6,<0.9", "shazamio==0.8.1", "shazamio-core>=1.1,<2", "yt-dlp", "audioop-lts; python_version >= '3.13'"]
 # ///
 """Identify the tracks in a SoundCloud DJ set, set79-style, from the command line.
 
@@ -10,6 +10,7 @@ Pipeline: yt-dlp download -> ffmpeg snippets -> Shazam -> merge -> table + JSON 
 import argparse
 import asyncio
 import base64
+import io
 import json
 import math
 import os
@@ -17,6 +18,7 @@ import re
 import subprocess
 import sys
 import warnings
+import wave
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -28,10 +30,12 @@ CACHE_DIR = Path.home() / "Library" / "Caches" / "setid"
 OUT_DIR = Path.home() / "Music" / "setid"
 UNKNOWN = "Unknown ID"
 RATE_LIMIT_WAIT = 60
+SAMPLE_RATE = 16000
 NOTION_VERSION = "2026-03-11"
 MIN_STEP = 90  # two snippets per track for sets whose tracks play at least 3 minutes
 REQUEST_OVERHEAD = 3  # ffmpeg + fingerprint + HTTP per snippet, measured: a 90-min set at step 30 and pace 12 took 45 min
 warnings.filterwarnings("ignore", category=SyntaxWarning)  # pydub, pulled in by shazamio, trips this on Python 3.13
+warnings.filterwarnings("ignore", message="Couldn't find ffmpeg", category=RuntimeWarning)  # pydub looks for a system ffmpeg setid never uses
 
 
 @dataclass
@@ -130,16 +134,29 @@ def download(url: str) -> tuple[str, int, Path]:
     return info.get("title") or path.stem, duration, path
 
 
+def pcm_to_wav(pcm: bytes, rate: int) -> bytes:
+    """Wrap 16-bit mono PCM in a WAV with real lengths; a piped WAV has none and makes shazamio-core shell out to ffmpeg."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
 async def snippet(audio: Path, offset: int, length: int) -> bytes:
+    import imageio_ffmpeg  # bundled ffmpeg, so nothing needs installing system-wide
+
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-v", "error", "-ss", str(offset), "-t", str(length), "-i", str(audio),
-        "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
+        imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-ss", str(offset), "-t", str(length), "-i", str(audio),
+        "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1",
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg failed at {hms(offset)}: {err.decode().strip()}")
-    return out
+    return pcm_to_wav(out, SAMPLE_RATE)
 
 
 @contextmanager

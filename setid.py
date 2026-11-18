@@ -24,9 +24,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-PROJECT_DIR = Path(__file__).resolve().parent  # resolve so a symlink on PATH still writes here
-CACHE_DIR = PROJECT_DIR / ".cache"
-OUT_DIR = PROJECT_DIR / "tracklists"
+CACHE_DIR = Path.home() / "Library" / "Caches" / "setid"
+OUT_DIR = Path.home() / "Music" / "setid"
 UNKNOWN = "Unknown ID"
 RATE_LIMIT_WAIT = 60
 NOTION_VERSION = "2026-03-11"
@@ -114,7 +113,7 @@ def merge(hits: list[Hit], step: int, min_unknown: int | None = None, strict: bo
 def download(url: str) -> tuple[str, int, Path]:
     import yt_dlp
 
-    CACHE_DIR.mkdir(exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
     opts = {
         "format": "bestaudio/best",
         "outtmpl": str(CACHE_DIR / "%(id)s.%(ext)s"),
@@ -337,7 +336,7 @@ def main() -> None:
         print("Looking up Spotify track links...", file=sys.stderr)
         entries = with_spotify_tracks(entries, lambda isrc: spotify_track(token, isrc))
 
-    OUT_DIR.mkdir(exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^\w-]+", "-", title).strip("-")[:80] or "set"
     if args.start or end < duration:  # keep partial runs from overwriting the full-set tracklist
         slug += f"_{hms(args.start)}-{hms(end)}".replace(":", "")

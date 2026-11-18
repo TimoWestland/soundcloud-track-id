@@ -1,6 +1,8 @@
 """Self-check for the merge logic. Run: python3 test_setid.py"""
 import argparse
+from pathlib import Path
 
+import setid
 from setid import Entry, MIN_STEP, REQUEST_OVERHEAD, UNKNOWN, Hit, auto_step, hms, merge, parse_time, render_markdown, split_title, spotify_track_list, to_hit, with_spotify_tracks
 
 A = dict(key="a", title="A", artist="X")
@@ -93,6 +95,12 @@ def test_split_title() -> None:
     assert title == "Set | Name", title
     assert body.startswith("[Open in soundcloud →](https://soundcloud.com/a/b)"), body
     assert split_title("no heading\n") == ("", "no heading\n")
+
+
+def test_output_and_cache_dirs() -> None:
+    assert setid.OUT_DIR == Path.home() / "Music" / "setid"
+    assert setid.CACHE_DIR == Path.home() / "Library" / "Caches" / "setid"
+    assert not hasattr(setid, "PROJECT_DIR")
 
 
 if __name__ == "__main__":

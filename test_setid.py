@@ -137,6 +137,12 @@ def test_shebang_uses_only_uv_managed_python() -> None:
     assert "--managed-python" in first, first
 
 
+def test_python_capped_where_shazamio_core_has_wheels() -> None:
+    # shazamio-core 1.1.2 ships Mac wheels only up to Python 3.12; above that uv compiles it, which a bare Mac can't
+    header = (Path(__file__).parent / "setid.py").read_text().split("# ///")[1]
+    assert 'requires-python = ">=3.11,<3.13"' in header, header
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

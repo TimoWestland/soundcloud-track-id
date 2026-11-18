@@ -8,6 +8,8 @@ CLEAN_PATH=/usr/bin:/bin:/usr/sbin:/sbin
 out=$(env -i HOME="$T" PATH="$CLEAN_PATH" SETID_URL="file://$PWD/setid.py" sh install.sh 2>&1) || { echo "$out"; echo "FAIL: install exited non-zero"; exit 1; }
 [ -x "$T/.local/bin/setid" ] && [ ! -L "$T/.local/bin/setid" ] || { echo "FAIL: setid not installed as an executable file"; exit 1; }
 echo "$out" | grep -q "open a new Terminal window" || { echo "$out"; echo "FAIL: no new-window hint"; exit 1; }
+# a bare Mac has no compiler, so every package must come as a ready-made wheel
+if echo "$out" | grep -q "Building "; then echo "$out" | grep "Building "; echo "FAIL: a package was compiled from source"; exit 1; fi
 env -i HOME="$T" PATH="$T/.local/bin:/usr/bin:/bin" "$T/.local/bin/setid" --help | grep -q "Examples:" || { echo "FAIL: setid --help"; exit 1; }
 
 ln -sf "$PWD/setid.py" "$T/.local/bin/setid"

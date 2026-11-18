@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --managed-python --script
 # /// script
-# requires-python = ">=3.11"
-# dependencies = ["imageio-ffmpeg>=0.6,<0.9", "shazamio==0.8.1", "shazamio-core>=1.1,<2", "yt-dlp", "audioop-lts; python_version >= '3.13'"]
+# requires-python = ">=3.11,<3.13"  # shazamio-core 1.1.2 has Mac wheels only up to 3.12
+# dependencies = ["imageio-ffmpeg>=0.6,<0.9", "shazamio==0.8.1", "shazamio-core>=1.1,<2", "yt-dlp"]
 # ///
 """Identify the tracks in a SoundCloud DJ set, set79-style, from the command line.
 

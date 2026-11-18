@@ -321,8 +321,34 @@ def render_markdown(title: str, url: str, duration: int, snippets: int, length: 
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+HELP_EPILOG = """\
+Examples:
+  setid https://soundcloud.com/artist/some-set --step 90
+      a whole set; every track of 3+ minutes gets two snippets
+  setid https://soundcloud.com/artist/some-set --start 1:50:00 --end 2:05:00 --step 30
+      find one track: only the minutes around it, snippets close together
+  setid https://soundcloud.com/artist/some-set --step 90 --copy-spotify
+      copy Spotify track links; paste them into a playlist in the Spotify app
+  setid https://soundcloud.com/artist/some-set --step 90 --notion
+      also create a Notion page with the tracklist
+
+Settings (optional, add to ~/.zshrc as export NAME=value):
+  SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+      exact Spotify track links instead of search links; needed for --copy-spotify
+  NOTION_TOKEN
+      Notion personal access token; needed for --notion
+  NOTION_SOUNDCLOUD_PAGE_ID
+      Notion page to create tracklists under (default: your Private section)
+
+Tracklists are saved to ~/Music/setid.
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="setid", description=__doc__.splitlines()[0], epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("url", help="SoundCloud set URL")
     ap.add_argument("--start", type=parse_time, default=0, help="analyse from this time, h:mm:ss (default: the beginning)")
     ap.add_argument("--end", type=parse_time, default=None, help="analyse up to this time, h:mm:ss (default: the end)")
@@ -336,7 +362,11 @@ def main() -> None:
     copy.add_argument("--copy-spotify", action="store_true", help="copy the Spotify track links, one per line, to paste into a playlist")
     ap.add_argument("--notion", action="store_true", help="also create a Notion page with the tracklist (needs NOTION_TOKEN)")
     ap.add_argument("--strict", action="store_true", help="only keep a track when two neighbouring snippets agree; needs at least two snippets per track")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     print("Downloading...", file=sys.stderr)
     title, duration, audio = download(args.url)

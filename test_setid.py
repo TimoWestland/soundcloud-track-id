@@ -111,6 +111,26 @@ def test_pcm_to_wav_has_real_length() -> None:
         assert w.getnframes() == 16000, w.getnframes()
 
 
+SETTINGS = ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "NOTION_TOKEN", "NOTION_SOUNDCLOUD_PAGE_ID"]
+
+
+def long_flags() -> list[str]:
+    return [o for a in setid.build_parser()._actions for o in a.option_strings if o.startswith("--") and o != "--help"]
+
+
+def test_help_lists_flags_settings_and_examples() -> None:
+    text = setid.build_parser().format_help()
+    for name in long_flags() + SETTINGS:
+        assert name in text, name
+    assert "Examples:" in text and "setid https://soundcloud.com/" in text
+
+
+def test_readme_lists_every_flag_and_setting() -> None:
+    readme = (Path(__file__).parent / "README.md").read_text()
+    for name in long_flags() + SETTINGS:
+        assert f"`{name}`" in readme, name
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
